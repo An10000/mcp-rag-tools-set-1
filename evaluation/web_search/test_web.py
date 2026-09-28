@@ -66,6 +66,26 @@ async def test_returns_structured_results_and_sends_expected_request():
     body = json.loads(request.content)
     assert body["query"] == "python release"
     assert body["max_results"] == 3
+    assert body["include_published_date"] is True
+    assert "include_domains" not in body
+
+
+async def test_sends_normalized_include_domains():
+    client, requests = mock_client(ok([]))
+    await web_search(
+        "q",
+        include_domains=["https://www.Comiket.co.jp/info/", " docs.tavily.com ", "comiket.co.jp"],
+        settings=SETTINGS,
+        client=client,
+    )
+    body = json.loads(requests[0].content)
+    assert body["include_domains"] == ["comiket.co.jp", "docs.tavily.com"]
+
+
+async def test_empty_include_domains_is_not_sent():
+    client, requests = mock_client(ok([]))
+    await web_search("q", include_domains=[], settings=SETTINGS, client=client)
+    assert "include_domains" not in json.loads(requests[0].content)
 
 
 async def test_empty_results_is_not_an_error():
@@ -144,6 +164,22 @@ async def test_truncates_long_snippets():
 async def test_rejects_blank_query(query):
     with pytest.raises(ValueError, match="query"):
         await web_search(query, settings=SETTINGS)
+
+
+@pytest.mark.parametrize(
+    "include_domains",
+    [
+        "comiket.co.jp",  # not a list
+        [123],
+        [""],
+        ["no spaces allowed.com x"],
+        ["localhost"],
+        [f"site{i}.com" for i in range(21)],
+    ],
+)
+async def test_rejects_invalid_include_domains(include_domains):
+    with pytest.raises(ValueError, match="include_domains"):
+        await web_search("q", include_domains=include_domains, settings=SETTINGS)
 
 
 @pytest.mark.parametrize("max_results", [0, 11, -1, True, 2.5, "5"])

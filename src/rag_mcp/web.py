@@ -20,6 +20,7 @@ TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 DEFAULT_MAX_RESULTS = 5
 MIN_MAX_RESULTS = 1
 MAX_MAX_RESULTS = 10
+MAX_INCLUDE_DOMAINS = 20
 SNIPPET_MAX_CHARS = 1000
 
 # HTTP statuses worth retrying: rate limiting and transient server errors.
@@ -67,11 +68,21 @@ Do not use for:
 - A topic merely because it is technical.
 
 Snippets are short excerpts, not full pages, and may be outdated or wrong. Prefer \
-official and primary sources, and say when a claim rests only on a snippet.\
+official and primary sources, and say when a claim rests only on a snippet. \
+published_date is an estimate of when a page was published or last updated, and may be null.\
 """
 
-QUERY_DESCRIPTION = "Search query. Use specific keywords, names, versions or dates rather than a full question."
+QUERY_DESCRIPTION = (
+    "Search query. Use specific keywords, names, versions or dates rather than a full question. "
+    "Write it in the language the official or primary sources use (e.g. Japanese for a Japanese "
+    "event, English for most software documentation)."
+)
 MAX_RESULTS_DESCRIPTION = f"Maximum number of results to return ({MIN_MAX_RESULTS}-{MAX_MAX_RESULTS})."
+INCLUDE_DOMAINS_DESCRIPTION = (
+    f"Optional list of up to {MAX_INCLUDE_DOMAINS} domains to restrict results to, e.g. "
+    '["docs.python.org"]. Use it when you know the official site, to get primary sources '
+    "instead of third-party pages. Omit it for open-ended searches."
+)
 
 
 class WebSearchError(Exception):
@@ -127,6 +138,7 @@ class WebSearchSettings:
 async def web_search(
     query: str,
     max_results: int = DEFAULT_MAX_RESULTS,
+    include_domains: list[str] | None = None,
     *,
     settings: WebSearchSettings | None = None,
     client: httpx.AsyncClient | None = None,
@@ -134,22 +146,27 @@ async def web_search(
     """Search the public web and return cleaned-up results.
 
     Raises:
-        ValueError: ``query`` or ``max_results`` is invalid.
+        ValueError: ``query``, ``max_results`` or ``include_domains`` is invalid.
         WebSearchConfigError: the API key or other settings are missing/invalid.
         WebSearchError: the request failed or the response could not be used.
     """
     query = _validate_query(query)
     _validate_max_results(max_results)
+    domains = _normalize_domains(include_domains)
     settings = settings or WebSearchSettings.from_env()
 
-    payload = {
+    payload: dict[str, Any] = {
         "query": query,
         "max_results": max_results,
         "search_depth": "basic",
         "include_answer": False,
         "include_raw_content": False,
         "include_images": False,
+        # Beta: Tavily's estimate of the publish/last-updated date, also for general search.
+        "include_published_date": True,
     }
+    if domains:
+        payload["include_domains"] = domains
 
     if client is not None:
         data = await _post_with_retries(client, settings, payload)
@@ -175,6 +192,31 @@ def _validate_max_results(max_results: int) -> None:
         raise ValueError("max_results must be an integer.")
     if not MIN_MAX_RESULTS <= max_results <= MAX_MAX_RESULTS:
         raise ValueError(f"max_results must be between {MIN_MAX_RESULTS} and {MAX_MAX_RESULTS}, got {max_results}.")
+
+
+def _normalize_domains(include_domains: list[str] | None) -> list[str]:
+    """Reduce entries like "https://www.Example.com/path" to "example.com", deduplicated."""
+    if include_domains is None:
+        return []
+    if not isinstance(include_domains, list):
+        raise ValueError("include_domains must be a list of domain names.")
+
+    domains: list[str] = []
+    for entry in include_domains:
+        if not isinstance(entry, str):
+            raise ValueError("include_domains must contain only strings.")
+        domain = entry.strip().lower()
+        domain = domain.split("://", 1)[-1].split("/", 1)[0]
+        # "www." would exclude the site's other subdomains.
+        domain = domain.removeprefix("www.")
+        if not domain or any(ch.isspace() for ch in domain) or "." not in domain:
+            raise ValueError(f"include_domains contains an invalid domain: {entry!r}.")
+        if domain not in domains:
+            domains.append(domain)
+
+    if len(domains) > MAX_INCLUDE_DOMAINS:
+        raise ValueError(f"include_domains accepts at most {MAX_INCLUDE_DOMAINS} domains, got {len(domains)}.")
+    return domains
 
 
 async def _post_with_retries(

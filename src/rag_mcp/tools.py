@@ -27,8 +27,12 @@ def register_tools(mcp: MCPServer) -> None:
             int,
             Field(ge=web.MIN_MAX_RESULTS, le=web.MAX_MAX_RESULTS, description=web.MAX_RESULTS_DESCRIPTION),
         ] = web.DEFAULT_MAX_RESULTS,
+        include_domains: Annotated[
+            list[str] | None,
+            Field(max_length=web.MAX_INCLUDE_DOMAINS, description=web.INCLUDE_DOMAINS_DESCRIPTION),
+        ] = None,
     ) -> web.SearchResponse:
         try:
-            return await web.web_search(query, max_results)
+            return await web.web_search(query, max_results, include_domains)
         except (ValueError, web.WebSearchError) as exc:
             raise ToolError(str(exc)) from exc
