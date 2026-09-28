@@ -6,6 +6,8 @@ Tests and quality tracking for the `web_search` tool ([src/rag_mcp/web.py](../..
 
 | Date | Change |
 |---|---|
+| 2026-09-28 | Agent evaluation round 3 of batch 2 (7 calls / 38 results). Batch 2 confirmed, no regressions; new minor findings N11–N17. |
+| 2026-09-28 | Batch 2: new `include_domains` parameter, `published_date` via Tavily's `include_published_date` (beta), query-language hint. `topic` dropped from the plan. Live check: 24/30 results dated (was 0/30), 10/10 domain-restricted results on the requested domain. |
 | 2026-09-28 | Moved `web_search_usage_feedback.md` from the repo root into this folder. |
 | 2026-09-28 | Added this README with test usage and the issue checklist. Deferred non-English garbled text (N1) to future language-adaptation work. |
 | 2026-09-28 | Agent evaluation round 2 of batch 1 (6 calls / 30 results). All batch 1 fixes confirmed; new findings N1–N10. |
@@ -53,13 +55,15 @@ bash:
 TAVILY_API_KEY=tvly-... python -m evaluation.web_search.live_check
 ```
 
-With no arguments it runs the default queries, the ones that exposed problems in earlier evaluations. Each result is printed with:
+With no arguments it runs the default queries (6 credits): the ones that exposed problems in earlier evaluations, plus two restricted with `include_domains`. Each result is printed with:
 
 - snippet length and `TRUNCATED` / `full`
+- `date: ...`: the `published_date` estimate, or `none`
 - `LEFTOVER NOISE: [...]`: markup that `_clean_text` should have removed. **This should never appear**; if it does, it's a regression.
+- `OUTSIDE include_domains`: a result from outside the requested domains. **This should never appear either.**
 - `known noise (not handled)`: noise we decided not to clean (see "Won't fix" below)
 
-The last line is a summary, e.g. `20 results, 15 truncated, 0 with leftover noise`.
+The last line is a summary, e.g. `30 results, 20 truncated, 0 with leftover noise, 24 with published_date, 0 outside include_domains`.
 
 ### Agent evaluation (manual)
 
@@ -75,30 +79,37 @@ IDs: `P*` = evaluation round 1, `N*` = evaluation round 2 (see [web_search_usage
 ### Fixed
 
 - [x] Description referenced the unregistered `database_search` tool (P5)
-- [x] Description exceeded Claude Code's 2,048-char limit and was truncated (P6). Now 1062 chars, warning about untrusted content moved to the top, length test added
+- [x] Description exceeded Claude Code's 2,048-char limit and was truncated (P6). Now about 1150 chars, warning about untrusted content moved to the top, length test added
 - [x] Cross-tool guidance moved to server instructions (`SERVER_INSTRUCTIONS` in `server.py`)
 - [x] Snippet cut off before key facts at 500 chars (P1). Limit raised to 1000
 - [x] Markdown noise in snippets (P7): `#` headings, blockquotes, code fences, backticks, `¶`, zero-width chars, `\_` escapes
 - [x] Search-highlight emphasis such as `_Python_`
 - [x] HTML tag stripping deleted autolinks (`<https://...>`) and comparisons (`x<y and y>z`). Only real HTML tags are stripped now
+- [x] No way to restrict results to official sites (P4, N4). New `include_domains` parameter (up to 20 domains, URLs normalized to bare domains, leading `www.` dropped)
+- [x] `published_date` always null (P2, N8). Now requested with Tavily's `include_published_date` (beta); it is an estimate of the publish or last-update date and can be wrong. `topic` was planned for this but is no longer needed
+- [x] Query language (N5). `QUERY_DESCRIPTION` now says to write the query in the language the official sources use
+
+- [x] Agent evaluation of batch 2 (round 3): `include_domains` used whenever the official site was known (25/25 results on-domain) and omitted for open-ended questions; Japanese queries for Comiket got 5/5 official results; 34/38 results dated
 
 ### Open, in planned order
 
-**Batch 2: parameters and guidance**
+**Small cleanup (optional)**
 
-- [ ] Expose `include_domains` so agents can restrict results to official sites (P4, N4). Twice in round 2, agents had to type the domain into the query
-- [ ] Expose `topic` (`general` / `news`). `published_date` is null for general search (P2, N8: 30/30 null)
-- [ ] Query-language hint in `QUERY_DESCRIPTION`: use the language of the official or local source. Round 2: Comiket English query 0/5 official results, Japanese 5/5 (N5)
+- [ ] `>` left after Tavily's `[...]` chunk separator, e.g. `[...] > The 2026-07-28 ...` (N12). `_BLOCKQUOTE_RE` only matches at line start
+- [ ] Strikethrough `~~text~~` (N13)
+- [ ] `published_date` wording: it is often the first publication date, not the last update (N15, e.g. a "3.14.7 documentation" page dated 2025-10-05)
 
 **Needs investigation**
 
 - [ ] Backslash-wrapped headings such as `\Rate limits\` (N3). Check the raw Tavily content before adding a rule; a naive rule would break Windows paths
+- [ ] Literal escape sequences such as `\n`, `​`, `\\"advanced\\"` (N11). Check the raw Tavily content first; `\n` can be real text in code docs
 
 **Later**
 
 - [ ] Stale or low-quality results ranked high (P3, N7). Evaluate `search_depth`; confirm the `fast` / `ultra-fast` credit cost first, since Tavily's docs contradict themselves
 - [ ] Snippet space taken by irrelevant chunks (N6). Consider exposing Tavily's `score`
 - [ ] No way to read a full page when a snippet is not enough. Planned as a separate `web_extract` tool
+- [ ] `topic` (`general` / `news` / `finance`): add only if agents need news-specific search
 
 ### Deferred
 
@@ -111,3 +122,6 @@ IDs: `P*` = evaluation round 1, `N*` = evaluation round 2 (see [web_search_usage
 - `[](` half-links and missing URLs ("POST to with"): present in Tavily's raw content, not caused by our cleanup
 - Live-data pages with no content (N9, e.g. train timetables): outside what web search can answer
 - Agent not clarifying ambiguous queries (N10): caller behavior, not the tool
+- Emoji shortcodes (`:magic_wand:`), footnote anchors, broken `</llms.txt>` links, alt text glued to navigation, site disclaimers (N13): rare, and rules risk real content such as times (`10:30:00`) or Sphinx roles (`:func:`)
+- Extra spaces inside Japanese text extracted from PDFs (N14): upstream extraction; removing spaces between CJK characters would damage normal text
+- Missing dates on some PDFs and GitHub pages (N16), and missing or duplicate titles (N17): upstream data; URL and date usually tell results apart

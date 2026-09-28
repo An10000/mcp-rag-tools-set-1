@@ -13,6 +13,7 @@
 |---|---|---|---|
 | 第一轮 | 2026-09-28（具体时刻未记录） | 批次 1 修正前 | 第 1～5 节 |
 | 第二轮 | 2026-09-28 16:48 (UTC-04:00) | 批次 1 修正后（未提交） | 第 6 节 |
+| 第三轮 | 2026-09-28 17:14 (UTC-04:00) | 批次 2 修正后（未提交） | 第 7 节 |
 
 ---
 
@@ -249,3 +250,79 @@
 1. **N1 控制字符**：改动小、收益明确，可并入批次 1 收尾；乱码检测需要先看原始返回再定。
 2. **N2、N3**：规则明确的噪声，可与 N1 一起处理，注意别误伤正常内容。
 3. **批次 2**：`include_domains` 优先级上调（N4）；query 语言提示改为"当地/官方语言"（N5）。
+
+---
+
+## 7. 第三轮评测 — 2026-09-28 17:14 (UTC-04:00)
+
+- 被测版本：批次 2 修正后（新增 `include_domains`，最多 20 个，会规范化并去掉 `www.`；每次请求都带 `include_published_date: true`；`QUERY_DESCRIPTION` 加了查询语言提示）。代码未提交。
+- 使用方：Claude Code（Opus 5.5），通过 ToolSearch 加载工具，没有改代码。
+- 信息来源说明：回答只基于 `web_search` 返回的 title/URL/snippet 和模型自身知识，**没有**调用 WebFetch。下文说到"原因"时，除非注明已核实，都是推断。
+
+### 7.1 批次 2 修正的验证
+
+| 检查项 | 结果 |
+|---|---|
+| 加载到的 schema 带 `include_domains`（`maxItems: 20`，默认 null） | ✅ 描述里写了"知道官方站点时使用、开放性搜索时省略" |
+| `QUERY_DESCRIPTION` 的语言提示 | ✅ 措辞是"用官方或一手来源所用的语言"，已按上一轮 N5 改了方向 |
+| 工具描述里说明 published_date 是估计值、可能为 null | ✅ |
+| `include_domains` 限定效果 | ✅ 用到的 5 次调用里 25/25 条结果都在指定域名内 |
+| 子域名匹配 | ✅ `python.org` 匹配到 discuss.、docs.、www.；`comiket.co.jp` 匹配到 harenohi.；`modelcontextprotocol.io` 匹配到 blog. |
+| `published_date` 覆盖率 | ✅ 7 次调用 38 条结果里 34 条有值（上一轮是 0/30）。4 条为 null：C108CtlgNotes.pdf、C109Schedule.html、GitHub Topics、cake.ai |
+| 语言提示的效果 | ✅ Comiket 两题用日文 query，5/5 都是官方结果（上一轮用英文 query 时 0 条官方） |
+
+### 7.2 试用过程（6 个问题，7 次调用 / 38 条结果，全部成功；另有 1 个问题按规则没有调用）
+
+| # | 用户问题 | query | include_domains | 结果 |
+|---|---|---|---|---|
+| 1 | Tavily search_depth 各选项的 credits | `Tavily search_depth basic advanced fast ultra-fast API credits cost` | `docs.tavily.com` | 5/5 官方，一次就覆盖四个选项（上一轮用了 2 次还不全）；官方文档里 ultra-fast 的价格仍然矛盾（1 vs 0.5） |
+| 2 | Python 3.14 最新补丁版本 | `Python 3.14 latest bugfix release` | `python.org` | 3.14.7（2026-08-05）；日期可以直接排出 3.14.7 → 3.14.6 → rc3 的先后 |
+| 3 | C109 日期和开场时间 | `コミックマーケット109 開催日 開場時間` | `comiket.co.jp` | 5/5 官方，一次拿到 12/29～31 和 10:30～16:00 |
+| 4 | 今年冬季 Comiket 入场券怎么买 | `コミックマーケット109 一般参加 入場チケット リストバンド 販売` | `comiket.co.jp` | C109 的售票信息还没公布；拿到 C108 的规则，以及"冬：11 月公布"的线索 |
+| 5 | httpx AsyncClient 默认超时 | —（没有调用） | — | 属于稳定知识、没有来源需求，按规则跳过 ✅ |
+| 6 | 最近值得关注的开源 RAG 框架 | ① `best open source RAG frameworks 2026 comparison`（8 条）② `open source RAG framework new release GitHub 2026 agentic retrieval`（5 条） | 省略（开放性问题） ✅ | 以第三方和厂商文章为主；日期帮助识别出一篇 2025 年的"2026"文章，也解释了各处 star 数为什么不一致 |
+| 7 | MCP 最新规范版本 | `Model Context Protocol specification latest version changelog` | `modelcontextprotocol.io` | 5/5 官方，是 2026-07-28 版；日期和版本号完全对应 |
+
+### 7.3 表现不错的地方
+
+- **`include_domains` 是这批改动里收益最大的一项**：上一轮 N4 要在 query 里手写域名、调用两次才能拿到官方来源，这轮每题一次调用就答完。调用方也能按字段说明，在开放性问题上省略它。
+- **`published_date` 很实用**：可以排出版本先后（Python、MCP），识别过时页面（2023 年的 Comiket 指南、标题写 2026 实际是 2025 年的 Meilisearch 文章），解释来源之间的数字冲突（RAGFlow 的 star 数 1 月约 7 万、8 月约 8.9 万）。上一轮 N7、N8 明显缓解。
+- **语言提示加上域名限定，非英语事件的效果最好**（问题 3、4）。
+- **不该搜索时没有搜索**（问题 5）：描述里的 "A topic merely because it is technical" 起了作用。
+
+### 7.4 新发现的问题（按优先级）
+
+**摘要噪声（新变体）**
+
+- **N11. 转义序列的原文**：Tavily SDK Reference 页的摘要里出现字面的 `\n`、`\u200b`、`\\"advanced\\"`，看起来是页面里嵌入的 JSON 字符串被多转义了一层。`_ZERO_WIDTH_RE` 只匹配真正的零宽字符，不匹配字面的 `\u200b`。**未核实**原始返回。修复有风险：代码文档里的 `\n` 可能本来就是正文，建议先看原始数据再定。
+- **N12. 行中间的 `>` 没有去掉**：MCP 页摘要里有 `[...] > The 2026-07-28 …`、`[...] > Documentation Index …`。已核实 `_BLOCKQUOTE_RE = ^[ \t]*>+[ \t]?`（MULTILINE）只匹配行首。推测：Tavily 用 ` [...] ` 把多个片段拼成一行，所以 `>` 落在了行中间。可以考虑增加一条规则，专门匹配 `[...]` 后面紧跟的 `> `。
+- **N13. 其他 markdown 或页面残留**，都是小问题：
+  - 删除线 `~~a dollar short~~`
+  - Discourse 表情短码 `:magic_wand:`
+  - 脚注锚点 `(#footnote-294147-1)`
+  - 残缺的尖括号链接 `at:</llms.txt>`
+  - 代码块残渣 `\"ragflow_server.py|task_executor.py\" \" \"`
+  - 图片 alt 文字和导航粘在一起：`home pagelight logodark logo`
+  - 站点免责声明："Responses are generated using AI and may contain mistakes."
+
+  其中 `~~` 和 `:shortcode:` 规则明确，容易处理；其余属于导航噪声，建议维持"不处理"的决定。
+- **N14. PDF 抽取出多余空格**：C108 PDF 的日文里到处是 `チケッ ト`、`リ ス トバン ド`。这是 Tavily 上游的抽取问题。直接删除 CJK 字符之间的空格会误伤正常文本，建议不处理，或者只在 URL 以 `.pdf` 结尾时考虑。
+
+**日期与标题**
+
+- **N15. `published_date` 是首次发布时间，不是最后更新时间**：docs.python.org 的 What's New 页标题写 "3.14.7 documentation"，日期却是 2025-10-05。工具描述已经说明这是估计值，不算 bug。可以考虑在描述里把 "published or last updated" 改成更保守的说法，不过现在的措辞也基本够用。
+- **N16. 部分结果没有日期**：PDF（C108CtlgNotes.pdf）、GitHub Topics、cake.ai、一个 comiket 页面没有日期；另一个 PDF（C108Appeal.pdf）有日期。覆盖率还算可以（34/38），属于上游限制。
+- **N17. 标题缺失或重复**：Medium 文章的 title 只有 "Medium"；MCP 三个版本的 changelog 标题完全一样。**未核实**原因，推测是页面 `<title>` 本来如此。有 URL 和日期时，调用方可以自己区分。
+
+**已知问题的新证据**
+
+- **N6（摘要被无关内容占用）继续出现**：C109Info 页两次返回的片段都跳过了需要的小节。第 4 题的摘要里只有 "一般参加者の入場について" 这个标题，下面的正文没有返回，1000 字符大多给了 IC 卡表和交通表。暴露 `score` 或者提供 `web_extract` 仍然有价值。
+- **官方文档自相矛盾**：Tavily ultra-fast 的价格在同一页里写了 1 和 0.5 两个值。这不是工具的问题；它仍然影响"之后要不要实现 search_depth"这个决定，实现前需要用真实账单核实。
+- **跨调用重复**：RAG 题两次调用重复了 2 个 URL。同一页在不同 query 下返回不同片段，这点有用，但占掉了名额。暂时不建议加排除参数。
+
+### 7.5 建议（仅供参考，由改代码的一方决定）
+
+1. **批次 2 可以提交**：`include_domains`、`published_date`、语言提示三项都达到了预期，没有发现回归。
+2. **小修补（可选，建议一批处理）**：N12（`[...] >`）、N13 里规则明确的 `~~删除线~~` 和 `:emoji_shortcode:`。处理前先用 live_check 看原始返回，注意别误伤正文。
+3. **先观察再决定**：N11（字面转义序列）和 N14（PDF 空格）都要先核实原始数据，风险高于收益时维持不处理。
+4. **后续批次**：按原计划推进 search_depth、`score`、`web_extract`。N6 这轮又出现了两次，说明 `web_extract` 或更好的片段选择仍然有价值。
