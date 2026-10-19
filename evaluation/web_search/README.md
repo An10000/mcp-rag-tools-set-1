@@ -108,7 +108,7 @@ IDs: `P*` = evaluation round 1, `N*` = evaluation round 2 (see [web_search_usage
 
 - [ ] Stale or low-quality results ranked high (P3, N7). Evaluate `search_depth`; confirm the `fast` / `ultra-fast` credit cost first, since Tavily's docs contradict themselves
 - [ ] Snippet space taken by irrelevant chunks (N6). Consider exposing Tavily's `score`
-- [ ] No way to read a full page when a snippet is not enough. Planned as a separate `web_extract` tool
+- [x] No way to read a full page when a snippet is not enough. Added as the separate `web_fetch` tool (see [evaluation/web_fetch](../web_fetch/README.md))
 - [ ] `topic` (`general` / `news` / `finance`): add only if agents need news-specific search
 
 ### Deferred

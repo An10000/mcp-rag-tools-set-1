@@ -7,6 +7,7 @@ MCP tools for RAG agents.
 | Tool | Description |
 | --- | --- |
 | `web_search` | Search the public web via [Tavily](https://tavily.com) and return titles, URLs and snippets. |
+| `web_fetch` | Fetch a public web page and return its readable content as Markdown, in chunks for long pages. Needs no API key. |
 
 ## Setup
 
@@ -21,6 +22,12 @@ Configuration is read from environment variables:
 | `TAVILY_API_KEY` | yes | - | Tavily API key |
 | `TAVILY_TIMEOUT` | no | `15` | Request timeout in seconds |
 | `TAVILY_SEARCH_URL` | no | `https://api.tavily.com/search` | Override the API endpoint |
+
+`TAVILY_API_KEY` is only needed by `web_search`.
+
+`web_fetch` connects directly to the target site. It refuses private and local network
+addresses (localhost, LAN, cloud metadata), ignores `HTTP(S)_PROXY` environment variables,
+limits each fetch to 15 seconds and 5 MB, and reads HTML, plain text, JSON and XML only.
 
 ## Run
 
@@ -47,4 +54,6 @@ Example MCP client configuration:
 pytest
 ```
 
-Tests live in `evaluation/` and mock the Tavily API, so no network access or API key is needed.
+Tests live in `evaluation/` and mock the Tavily API, DNS and HTTP, so no network access or API key is needed.
+See [evaluation/web_search](evaluation/web_search/README.md) and [evaluation/web_fetch](evaluation/web_fetch/README.md)
+for per-tool details and the manual live checks.

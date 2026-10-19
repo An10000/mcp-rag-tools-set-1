@@ -9,7 +9,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
-from rag_mcp import web
+from rag_mcp import fetch, web
 
 
 def register_tools(mcp: MCPServer) -> None:
@@ -35,4 +35,23 @@ def register_tools(mcp: MCPServer) -> None:
         try:
             return await web.web_search(query, max_results, include_domains)
         except (ValueError, web.WebSearchError) as exc:
+            raise ToolError(str(exc)) from exc
+
+    @mcp.tool(
+        name="web_fetch",
+        title="Web Fetch",
+        description=fetch.WEB_FETCH_DESCRIPTION,
+        annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True),
+    )
+    async def web_fetch_tool(
+        url: Annotated[str, Field(max_length=fetch.MAX_URL_LENGTH, description=fetch.URL_DESCRIPTION)],
+        max_chars: Annotated[
+            int,
+            Field(ge=fetch.MIN_MAX_CHARS, le=fetch.MAX_MAX_CHARS, description=fetch.MAX_CHARS_DESCRIPTION),
+        ] = fetch.DEFAULT_MAX_CHARS,
+        cursor: Annotated[str | None, Field(description=fetch.CURSOR_DESCRIPTION)] = None,
+    ) -> fetch.FetchResponse:
+        try:
+            return await fetch.web_fetch(url, max_chars, cursor)
+        except (ValueError, fetch.WebFetchError) as exc:
             raise ToolError(str(exc)) from exc
