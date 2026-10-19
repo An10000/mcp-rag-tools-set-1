@@ -720,3 +720,75 @@ async def test_cache_evicts_oldest_documents():
 async def test_invalid_max_chars(max_chars):
     with pytest.raises(ValueError):
         await fetch("https://example.com/", FakeWeb({}), max_chars=max_chars)
+
+
+# --- SSRF scenarios ------------------------------------------------------------
+# What an agent steered by a malicious page might try. Everything is faked, so no
+# request leaves the machine; each test checks the error and that nothing internal
+# was contacted.
+
+METADATA_IP = "169.254.169.254"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        f"http://{METADATA_IP}/latest/meta-data/iam/security-credentials/",  # AWS IMDS
+        f"http://{METADATA_IP}/metadata/instance?api-version=2021-02-01",  # Azure
+        "http://[fd00:ec2::254]/latest/meta-data/",  # AWS IMDS over IPv6
+        "http://100.100.100.200/latest/meta-data/",  # Alibaba Cloud
+        f"http://[::ffff:{METADATA_IP}]/latest/meta-data/",  # IPv4-mapped spelling
+    ],
+)
+async def test_cloud_metadata_addresses_are_refused(url):
+    web, dns = FakeWeb({}), FakeDNS()
+    error = await expect_error("blocked_address", url, web, dns)
+    assert "non-public address" in str(error)
+    assert web.requests == [] and dns.calls == []
+
+
+async def test_metadata_hostname_is_refused_after_resolution():
+    dns = FakeDNS({"metadata.google.internal": [METADATA_IP]})
+    web = FakeWeb({})
+    error = await expect_error("blocked_address", "http://metadata.google.internal/computeMetadata/v1/", web, dns)
+    assert METADATA_IP in str(error)
+    assert web.requests == []
+
+
+@pytest.mark.parametrize(
+    ("target", "records"),
+    [
+        ("http://localhost:8000/", {"localhost": ["::1", "127.0.0.1"]}),
+        ("http://127.0.0.1:8000/admin", {}),
+        ("http://[::1]:8000/", {}),
+        (f"http://{METADATA_IP}/latest/meta-data/", {}),
+        ("http://metadata.google.internal/computeMetadata/v1/", {"metadata.google.internal": [METADATA_IP]}),
+        ("http://router.lan/", {"router.lan": ["192.168.1.1"]}),
+    ],
+    ids=["localhost", "loopback_ip", "loopback_ipv6", "metadata_ip", "metadata_host", "lan_host"],
+)
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+async def test_public_redirect_to_internal_target_is_refused(target, records, status):
+    # A public "redirect-to" endpoint, as on httpbin.org/redirect-to?url=...
+    redirect = httpx.Response(status, headers={"location": target})
+    web = FakeWeb({("redirector.example", "/redirect-to"): redirect})
+    dns = FakeDNS({"redirector.example": [PUBLIC_IP], **records})
+
+    await expect_error("blocked_address", "https://redirector.example/redirect-to?url=x", web, dns)
+    # Only the public redirector was contacted; the internal target never was.
+    assert [r.url.host for r in web.requests] == [PUBLIC_IP]
+
+
+async def test_redirect_chain_through_several_public_sites_to_localhost_is_refused():
+    web = FakeWeb(
+        {
+            ("a.example", "/"): httpx.Response(302, headers={"location": "https://b.example/next"}),
+            ("b.example", "/next"): httpx.Response(302, headers={"location": "/last"}),
+            ("b.example", "/last"): httpx.Response(307, headers={"location": "http://localhost:8000/"}),
+        }
+    )
+    dns = FakeDNS({"a.example": [PUBLIC_IP], "b.example": [PUBLIC_IP_2], "localhost": ["127.0.0.1"]})
+
+    await expect_error("blocked_address", "https://a.example/", web, dns)
+    assert [r.headers["host"] for r in web.requests] == ["a.example", "b.example", "b.example"]
+    assert dns.calls == ["a.example", "b.example", "b.example", "localhost"]

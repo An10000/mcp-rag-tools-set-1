@@ -111,3 +111,56 @@ def test_untrusted_content_warning_comes_first():
 
 def test_server_instructions_describe_both_tools():
     assert "web_search" in SERVER_INSTRUCTIONS and "web_fetch" in SERVER_INSTRUCTIONS
+
+
+# --- what the agent sees for refused SSRF targets --------------------------------
+# The real web_fetch runs, with DNS and HTTP faked, so nothing leaves the machine.
+
+
+@pytest.fixture
+def fake_network(monkeypatch):
+    """Run the real web_fetch against a fake public redirector and fake DNS."""
+    import httpx
+
+    from evaluation.web_fetch.test_fetch import PUBLIC_IP, FakeDNS, FakeWeb
+
+    web = FakeWeb(
+        {
+            ("redirector.example", "/redirect-to"): httpx.Response(
+                302, headers={"location": "http://localhost:8000/"}
+            ),
+        }
+    )
+    dns = FakeDNS({"redirector.example": [PUBLIC_IP], "localhost": ["127.0.0.1"]})
+    real_fetch = fetch.web_fetch
+
+    async def networked_fetch(url: str, max_chars: int = 8000, cursor: str | None = None) -> FetchResponse:
+        return await real_fetch(
+            url, max_chars, cursor, resolver=dns, transport=web.transport, cache=fetch.DocumentCache(600, 20)
+        )
+
+    monkeypatch.setattr(fetch, "web_fetch", networked_fetch)
+    return web
+
+
+@pytest.mark.parametrize(
+    ("url", "address"),
+    [
+        ("http://169.254.169.254/latest/meta-data/", "169.254.169.254"),
+        ("https://redirector.example/redirect-to?url=http://localhost:8000/", "127.0.0.1"),
+    ],
+    ids=["cloud_metadata", "public_redirect_to_localhost"],
+)
+async def test_agent_gets_a_clear_refusal_for_ssrf_targets(fake_network, url, address):
+    async with Client(create_server()) as client:
+        result = await client.call_tool("web_fetch", {"url": url})
+
+    assert result.is_error
+    assert result.structured_content is None  # no page content at all
+    text = result.content[0].text
+    assert "[blocked_address]" in text
+    assert f"non-public address ({address})" in text
+    if "redirect-to" in url:
+        assert "The page redirected to 'http://localhost:8000/'" in text
+    # The redirector may be contacted; the internal target never is.
+    assert all(r.url.host not in ("127.0.0.1", "169.254.169.254") for r in fake_network.requests)

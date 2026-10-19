@@ -432,8 +432,15 @@ async def _fetch_document(
 async def _fetch_following_redirects(
     url: httpx.URL, settings: WebFetchSettings, resolver: Resolver, transport: httpx.AsyncBaseTransport | None
 ) -> _RawPage:
-    for _ in range(settings.max_redirects + 1):
-        page = await _fetch_once(url, settings, resolver, transport)
+    for hop in range(settings.max_redirects + 1):
+        try:
+            page = await _fetch_once(url, settings, resolver, transport)
+        except WebFetchError as exc:
+            if hop and exc.code in ("blocked_address", "invalid_url"):
+                # Say that a redirect led here, or the agent sees a host it never asked for.
+                message = str(exc).removeprefix(f"[{exc.code}] ")
+                raise WebFetchError(exc.code, f"The page redirected to {str(url)!r}. {message}") from None
+            raise
         location = page.headers.get("location")
         if page.status not in _REDIRECT_STATUS or not location:
             return page
@@ -441,7 +448,11 @@ async def _fetch_following_redirects(
             url = url.join(location)
         except httpx.InvalidURL:
             raise WebFetchError("http_error", f"The page redirected to an invalid URL: {location!r}.") from None
-        _check_url(url)
+        try:
+            _check_url(url)
+        except WebFetchError as exc:
+            message = str(exc).removeprefix(f"[{exc.code}] ")
+            raise WebFetchError(exc.code, f"The page redirected to {location!r}. {message}") from None
     raise WebFetchError("too_many_redirects", f"The page redirected more than {settings.max_redirects} times.")
 
 

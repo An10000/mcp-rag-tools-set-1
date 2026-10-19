@@ -6,6 +6,7 @@ Tests and quality tracking for the `web_fetch` tool ([src/rag_mcp/fetch.py](../.
 
 | Date | Change |
 |---|---|
+| 2026-10-18 | Offline SSRF scenario tests: cloud metadata endpoints (AWS, Azure, GCP hostname, Alibaba, IPv6 IMDS) and public redirects (all 3xx codes, multi-hop chains) to localhost, metadata and LAN hosts, at module and MCP-tool level. Errors after a redirect now say where the page redirected to. Agents should not probe these live: the tests cover them without sending anything. |
 | 2026-10-18 | Fixes from agent evaluation round 1 (P1-P5 in [web_fetch_usage_feedback.md](web_fetch_usage_feedback.md)): code inside list items kept as multi-line fenced blocks; sections with ids like `comments` no longer dropped as reader comments; in-page links unwrapped to text so link-only lists survive; links made absolute against the page before extraction (fixes `../` links); `published_date` without extensive search, code samples, or years absent from the page; `full_text` keeps list nesting. Hex/decimal IP spellings covered by tests. |
 | 2026-10-18 | Agent evaluation round 1 (8 calls in scope). See [web_fetch_usage_feedback.md](web_fetch_usage_feedback.md). |
 | 2026-10-18 | Small fixes before agent evaluation: in-page links pointed at the site root (`https://host#x`, a trafilatura bug) and now point at the page; headings that are only self-links become plain text; trafilatura's Markdown escapes (`snake\_case`, `\<`) removed outside code; screen-reader-only and `hidden` elements dropped (they duplicated the page title); `full_text` description corrected. |
@@ -61,7 +62,7 @@ A 200 response can still be the wrong page. When little text is extracted, the r
 | File | Purpose | Network |
 |---|---|---|
 | `test_fetch.py` | Unit tests for `rag_mcp.fetch`: address checks, pinned connections, redirects, DNS rebinding, time and size limits, content types, extraction fallback, warnings, chunks and cursors. DNS and HTTP are faked. | No |
-| `test_tools.py` | The `web_fetch` MCP tool through an in-process MCP client: schema, structured output, error codes, length limits on text sent to the model. | No |
+| `test_tools.py` | The `web_fetch` MCP tool through an in-process MCP client: schema, structured output, error codes, length limits on text sent to the model, and the exact refusal an agent gets for SSRF targets. | No |
 | `live_check.py` | Manual check against real sites, including TLS failures (badssl.com) and refused local addresses. Not collected by pytest. | Yes |
 
 ## Running the tests
