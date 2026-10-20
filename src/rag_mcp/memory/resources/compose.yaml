@@ -1,0 +1,30 @@
+name: rag-mcp
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.1-pg17
+    environment:
+      POSTGRES_DB: rag_memory
+      POSTGRES_USER: rag_admin
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or run rag-mcp setup}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - memory_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U rag_admin -d rag_memory"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    # Verified Ollama 0.40.6; keep inference runtime stable alongside model digests.
+    image: ollama/ollama@sha256:265409e1d931028a8f7d5a32bcbafddd7bffbc6cc629d77efe9560adf692a5e7
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - model_data:/root/.ollama
+
+volumes:
+  memory_data:
+  model_data:

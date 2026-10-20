@@ -10,6 +10,7 @@ from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from rag_mcp import web
+from rag_mcp.memory.tools import register_tools as register_memory_tools
 
 
 def register_tools(mcp: MCPServer) -> None:
@@ -36,3 +37,5 @@ def register_tools(mcp: MCPServer) -> None:
             return await web.web_search(query, max_results, include_domains)
         except (ValueError, web.WebSearchError) as exc:
             raise ToolError(str(exc)) from exc
+
+    register_memory_tools(mcp)
