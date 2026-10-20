@@ -38,3 +38,9 @@ Thumbs.db
 data/*
 !data/sample/
 !data/sample/.gitkeep
+
+# Generated database reports, scratch files and local secrets.
+# Keep schema, examples and tests versioned; they are reproducible source inputs.
+.local/
+*.dump
+*.backup
